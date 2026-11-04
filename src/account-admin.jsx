@@ -10,7 +10,7 @@ const rarityIndex = rarity => ['Common','Uncommon','Rare','Epic','Legendary','My
 const levelLabel = level => level===1?'Base':`Upgrade ${level-1}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const makeCombatDefaults = () => clone(DEFAULT_COMBAT_BALANCE);
-const makeSummonDefaults = () => ({verseMinutes:45,featuredMinutes:90,prices:{single:100,five:450,ten:900},bannerImage:'',characterEligibility:{}});
+const makeSummonDefaults = () => ({verseMinutes:60,featuredMinutes:90,prices:{single:100,five:450,ten:900},bannerImage:'',characterEligibility:{}});
 function normalizedChar(c) { return c ? {...c,baseDamage:Number(c.baseDamage ?? c.base_damage ?? 22),range:Number(c.range ?? 110),attackSpeed:Number(c.attackSpeed ?? c.attack_speed ?? 5),incomePerWave:Number(c.incomePerWave ?? c.income_per_wave ?? 0),buffPercent:Number(c.buffPercent ?? c.buff_percent ?? 0),abilities:Array.isArray(c.abilities)?c.abilities:[]} : null; }
 function defaultLevelRows(c, gameBalance) {
   if (!c) return []; const max=MAX_LEVEL[c.rarity]||1, rank=Math.max(0,rarityIndex(c.rarity));
