@@ -1,4 +1,5 @@
 name: Deploy Shonen Siege Tower Defense
+# Build and deploy the Vite app from the selected branch.
 
 on:
   push:
