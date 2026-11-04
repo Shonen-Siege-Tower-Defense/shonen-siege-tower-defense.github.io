@@ -1,5 +1,5 @@
 name: Deploy Shonen Siege Tower Defense
-# Build and deploy the verified production Vite app from main.
+# Production deployment: build Vite and publish dist to GitHub Pages.
 
 on:
   push:
