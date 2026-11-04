@@ -863,9 +863,10 @@ function Summon({save,setSave,notify,session}) {
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const verses = useMemo(() => [...new Set(CHARACTERS.filter(c=>c.rarity==='Mythic').map(c=>c.anime))].sort(), []);
+  const eligibleCharacters = CHARACTERS.filter(c=>c.enabled!==false);
+  const verses = useMemo(() => [...new Set(eligibleCharacters.filter(c=>c.rarity==='Mythic').map(c=>c.anime))].sort(), []);
   const activeVerse = getRotatingVerse(clock, verses);
-  const mythics = CHARACTERS.filter(c=>c.rarity==='Mythic' && c.enabled!==false);
+  const mythics = eligibleCharacters.filter(c=>c.rarity==='Mythic');
   const featuredSlot = Math.floor(clock / (90 * 60 * 1000));
   const featuredMythic = mythics.length ? mythics[stableHash(`featured-${featuredSlot}`) % mythics.length] : null;
   const selectionReadyAt = selectionChangedAt + 12*60*60*1000;
@@ -877,7 +878,7 @@ function Summon({save,setSave,notify,session}) {
   const featuredRemainingMs = 90*60*1000 - (clock % (90*60*1000));
   const featuredRemainingLabel = `${Math.floor(featuredRemainingMs/60000)}:${String(Math.floor((featuredRemainingMs%60000)/1000)).padStart(2,'0')}`;
   const remainingLabel = `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,'0')}`;
-  const bannerPool = bannerMode === 'verse' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.anime===activeVerse) : bannerMode === 'featured' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===featuredMythic?.id) : bannerMode === 'selection' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===selectedMythic) : CHARACTERS;
+  const bannerPool = bannerMode === 'verse' ? eligibleCharacters.filter(c=>c.rarity!=='Mythic' || c.anime===activeVerse) : bannerMode === 'featured' ? eligibleCharacters.filter(c=>c.rarity!=='Mythic' || c.id===featuredMythic?.id) : bannerMode === 'selection' ? eligibleCharacters.filter(c=>c.rarity!=='Mythic' || c.id===selectedMythic) : eligibleCharacters;
   const pending = !!pack && (reveal.length < pack.length || (sequenceActive && sequenceIndex === pack.length - 1));
   const open = (count) => {
     if (opening || pending) return;
@@ -939,10 +940,11 @@ function Summon({save,setSave,notify,session}) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><div className="eyebrow">SUMMON LAB</div><h1>Shonen Summoning</h1><p>Summon 1 for 100 gems, 5 for 450, or 10 for 900. Reveal your cards before summoning again.</p></div>
+        <div><div className="eyebrow">SUMMON LAB</div><h1>SUMMONING</h1><p>Summon 1 for 100 gems, 5 for 450, or 10 for 900. Reveal your cards before summoning again.</p></div>
         <div className="big-gem">💎 {save.gems.toLocaleString()}</div>
       </div>
       <div className="banner-selector" role="tablist" aria-label="Summon banners">
+        <button role="tab" aria-selected={bannerMode==='all'} className={bannerMode==='all'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('all');setShowBannerRoster(false);}}><span className="eyebrow">FULL ROSTER</span><strong>ALL CHARACTERS</strong><small>Mythics from every eligible verse</small></button>
         <button role="tab" aria-selected={bannerMode==='verse'} className={bannerMode==='verse'?'banner-option verse-option active':'banner-option verse-option'} disabled={pending||opening} onClick={()=>{setBannerMode('verse');setShowBannerRoster(false);}}>
           <span className="eyebrow">ROTATING · VERSE</span><strong>{activeVerse.toUpperCase()}</strong><small>Verse Mythics · changes in {remainingLabel}</small>
         </button>
@@ -958,9 +960,9 @@ function Summon({save,setSave,notify,session}) {
           <div className="summon-copy"><div className="eyebrow">{bannerMode==='verse'?`${activeVerse.toUpperCase()} VERSE BANNER`:bannerMode==='featured'?'FEATURED MYTHIC BANNER':bannerMode==='selection'?'CUSTOM MYTHIC SELECTION':'ALL-UNIT BANNER'}</div><h2>OPEN THE GATE.</h2><p>{bannerMode==='verse'?'Only the Mythic pool is restricted to this featured verse; lower rarities use the full roster.':bannerMode==='featured'?'Only the featured Mythic can drop at Mythic rarity; lower rarities use the full roster.':bannerMode==='selection'?'Choose one Mythic to target. Lower rarities remain available; only your selected Mythic can drop.':'Summon from the full roster.'} Duplicates are kept.</p>{bannerMode==='selection' && <div className="selection-controls"><label>Choose your Mythic<select value={selectedMythic} disabled={!selectionCanChange || opening || pending} onChange={async e=>{const id=e.target.value;if(!id)return;try{let changedAt=Date.now();if(session){const result=await rpc(session,'set_custom_mythic_selection',{p_character_id:id});changedAt=Number(result.changedAt||changedAt);}setSelectedMythic(id);localStorage.setItem('shonen-siege-selected-mythic',id);setSelectionChangedAt(changedAt);localStorage.setItem('shonen-siege-selection-changed-at',String(changedAt));}catch(err){notify(err.message||'Could not change Mythic selection.');}}}><option value="">Select a Mythic…</option>{mythics.map(c=><option key={c.id} value={c.id}>{c.name} · {c.anime}</option>)}</select></label><small>{selectionCanChange?'You can change your selection now.':`Selection locked for ${selectionRemainingLabel}.`}</small></div>}</div>
           <div className="pack-visual"><div className="pack-glow"></div><div className="pack-mark">🎴</div><div className="pack-name">SHONEN<br/><b>SIEGE</b></div></div>
           <div className="summon-buttons">
-            <button className="secondary" disabled={opening||pending} onClick={()=>open(1)}>{opening?'SUMMONING...':'SUMMON 1 — 💎 100'}</button>
-            <button className="secondary" disabled={opening||pending} onClick={()=>open(5)}>{opening?'SUMMONING...':'SUMMON 5 — 💎 450'}</button>
-            <button className="primary pack-button" disabled={opening||pending} onClick={()=>open(10)}>{opening?'SUMMONING...':'SUMMON 10 — 💎 900'}</button>
+            <button className="secondary" disabled={opening||pending} onClick={()=>open(1)}>{opening?'SUMMONING...':`SUMMON 1 — 💎 ${SINGLE_COST}`}</button>
+            <button className="secondary" disabled={opening||pending} onClick={()=>open(5)}>{opening?'SUMMONING...':`SUMMON 5 — 💎 ${FIVE_COST}`}</button>
+            <button className="primary pack-button" disabled={opening||pending} onClick={()=>open(10)}>{opening?'SUMMONING...':`SUMMON 10 — 💎 ${TEN_COST}`}</button>
           </div>
           <div className="banner-roster-actions"><button className="text-btn" onClick={()=>setShowBannerRoster(v=>!v)}>{showBannerRoster?'HIDE BANNER ROSTER':'VIEW CHARACTERS IN THIS BANNER'} ({bannerPool.length})</button></div>
           {showBannerRoster && <div className="banner-roster"><div className="eyebrow">AVAILABLE CHARACTERS · {bannerMode==='all'?'ALL VERSES':activeVerse}</div><div className="banner-pool-grid">{bannerPool.map(c=><div key={c.id} className="banner-pool-card"><span style={{color:RARITY_COLOR[c.rarity]}}>{c.rarity}</span><b>{c.name}</b><small>{c.anime}</small></div>)}</div></div>}
