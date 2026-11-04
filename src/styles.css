@@ -196,3 +196,10 @@ radial-gradient(circle at 50% 50%,#151c27,#0b0e16 72%);background-size:34px 34px
 /* V3.6 banner selection controls */
 .selection-controls{display:grid;gap:7px;max-width:360px;margin-top:14px;padding:12px;border:1px solid #39435a;border-radius:10px;background:#0d1420}.selection-controls label{display:grid;gap:7px;color:#b9c5d8;font-size:11px;font-weight:800}.selection-controls select{width:100%;background:#0a101a;color:#ecf1fb;border:1px solid #303b51;border-radius:8px;padding:10px}.selection-controls small{color:#a6b2c7;font-size:11px}
 @media(max-width:780px){.banner-selector{grid-template-columns:1fr}}
+
+/* Summon banner selection and custom centre artwork */
+.banner-selector{grid-template-columns:repeat(4,minmax(0,1fr))}
+.summon-custom-art{overflow:hidden;padding:0;background:#090d18}
+.summon-custom-art img{display:block;width:100%;height:100%;min-height:280px;max-height:420px;object-fit:cover;border-radius:18px}
+@media(max-width:850px){.banner-selector{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.banner-selector{grid-template-columns:1fr}}
