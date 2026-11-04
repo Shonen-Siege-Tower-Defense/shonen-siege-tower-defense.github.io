@@ -947,7 +947,7 @@ function Summon({save,setSave,notify,session}) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><div className="eyebrow">SUMMON LAB</div><h1>SUMMONING</h1><p>Summon 1 for 100 gems, 5 for 450, or 10 for 900. Reveal your cards before summoning again.</p></div>
+        <div><div className="eyebrow">SUMMON LAB</div><h1>SUMMONING</h1><p>Summon 1 for {SUMMON_CONFIG.prices.single} gems, 5 for {SUMMON_CONFIG.prices.five}, or 10 for {SUMMON_CONFIG.prices.ten}. Choose a banner to target your favourite Mythics.</p></div>
         <div className="big-gem">💎 {save.gems.toLocaleString()}</div>
       </div>
       <div className="banner-selector" role="tablist" aria-label="Summon banners">
