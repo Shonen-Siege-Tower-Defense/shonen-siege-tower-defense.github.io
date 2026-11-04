@@ -38,8 +38,9 @@ const SLOT_RULES = {
   4: { wave: 10, gems: 250 },
   5: { wave: 25, gems: 500 },
 };
-const BASE_DROP_RATES = { Common: 45, Uncommon: 25, Rare: 16, Epic: 9, Legendary: 4, Mythic: 1 };
-const PITY = { Rare: 10, Epic: 25, Legendary: 50, Mythic: 100 };
+const BASE_DROP_RATES = { Common: 50, Uncommon: 25, Rare: 18.9, Epic: 5, Legendary: 1, Mythic: 0.1 };
+const PITY = { Epic: 50, Legendary: 100, Mythic: 500 };
+const TARGET_DPS_BY_RARITY = { Common:20, Uncommon:29, Rare:43, Epic:65, Legendary:96, Mythic:145 };
 
 const CORE_CHARACTERS = [
   {id:'naruto', name:'Naruto Uzumaki', anime:'Naruto', rarity:'Rare', cost:250, baseDamage:34, range:115, attackSpeed:650, abilities:['Shadow Clone','Rasengan','Rasenshuriken']},
@@ -106,7 +107,15 @@ function buildRosterCharacter(entry, index) {
 }
 
 const DEFAULT_CHARACTERS = [...CORE_CHARACTERS, ...ROSTER_ADDITIONS.map(buildRosterCharacter)]
-  .map(character => ({ ...character, ...(BASE_CHARACTER_OVERRIDES[character.id] || {}) }));
+  .map(character => ({ ...character, ...(BASE_CHARACTER_OVERRIDES[character.id] || {}) }))
+  .map((character,index) => {
+    if (character.role === 'money' || Number(character.attackSpeed) <= 0) return character;
+    const target = TARGET_DPS_BY_RARITY[character.rarity] || TARGET_DPS_BY_RARITY.Rare;
+    const variation = 0.88 + ((stableHash(`${character.id}-${index}`) % 25) / 100);
+    const legacyMs = Number(character.attackSpeed);
+    const spa = 3 + ((legacyMs - 390) / (1100 - 390)) * 5;
+    return { ...character, attackSpeed: Math.round(Math.max(3, Math.min(8, spa)) * 100) / 100, baseDamage: Math.round(target * variation * Math.max(3, Math.min(8, spa)) * 10) / 10 };
+  });
 let CHARACTERS = DEFAULT_CHARACTERS.slice();
 
 // Image paths are stored in src/game-config.js as paths relative to public/.
@@ -128,26 +137,22 @@ const enemyImage = (type, name='') => {
   const path = ENEMY_ART[type];
   return path ? (String(path).startsWith('http') ? path : publicAsset(path)) : '';
 };
-const unitIncome = (unit) => unit?.card?.role === 'money'
-  ? Number(characterLevelStats(unit.card, unit.level || 1).income || 0)
-  : 0;
+const unitIncome = (unit) => Number(characterLevelStats(unit?.card, unit?.level || 1).income || 0);
 
 function defaultCharacterLevelStats(card, level) {
   const lv = Math.max(1, Math.min(Number(level) || 1, UPGRADE_LIMIT[card?.rarity] || 1));
   const step = lv - 1;
   const rank = Math.max(0, rarityRank(card?.rarity));
-  if (card?.role === 'money') {
-    return { level:lv, damage:0, range:0, attackSpeed:0, income:Math.round(Number(card.incomePerWave || 0) * (1 + step * GAME_BALANCE.incomeUpgradeMultiplier)), buffPercent:0, upgradeCost:lv === 1 ? 0 : Math.round(90 + (lv - 1) * 55 + rank * 25) };
-  }
-  let damage = Number(card?.baseDamage || 0);
-  for (let n=0;n<step;n++) damage=Math.round(damage*1.3);
+  const hasAttack = Number(card?.baseDamage)>0 && Number(card?.attackSpeed)>0;
+  let damage = hasAttack ? Number(card.baseDamage) : 0;
+  for (let n=0;n<step;n++) damage=Math.round(damage*1.12);
   return {
     level:lv,
     damage,
-    range:Math.max(11, Number(card?.range || 0) / 12) + 0.9 * step,
-    attackSpeed:Math.max(220, Number(card?.attackSpeed || 680) - 38 * step),
-    income:0,
-    buffPercent:card?.role === 'support' ? Number(card?.buffPercent || 0.13) * (1 + step * 0.1) : 0,
+    range:hasAttack ? Math.max(11, Number(card?.range || 0) / 12) + 0.9 * step : 0,
+    attackSpeed:hasAttack ? Math.max(3, Number(card?.attackSpeed || 5) - 0.15 * step) : 0,
+    income:Number(card?.incomePerWave||0)>0 ? Math.round(Number(card.incomePerWave) * (1 + step * GAME_BALANCE.incomeUpgradeMultiplier)) : 0,
+    buffPercent:Number(card?.buffPercent||0)>0 ? Number(card.buffPercent) * (1 + step * 0.1) : 0,
     upgradeCost:lv === 1 ? 0 : Math.round(90 + (lv - 1) * 55 + rank * 25),
   };
 }
@@ -185,7 +190,7 @@ function freshSave() {
     waveBest: 0,
     unlockedSlots: 3,
     owned: Object.fromEntries(CHARACTERS.map(c => [c.id, STARTERS.includes(c.id) ? 1 : 0])),
-    pity: {Rare:0, Epic:0, Legendary:0, Mythic:0},
+    pity: {Epic:0, Legendary:0, Mythic:0, verseEpic:0, verseLegendary:0, verseMythic:0, featuredEpic:0, featuredLegendary:0, featuredMythic:0, selectionEpic:0, selectionLegendary:0, selectionMythic:0},
     cardImages: {},
   };
 }
@@ -204,6 +209,8 @@ function normalizeSave(raw) {
   merged.waveBest = Math.max(0, Number(merged.waveBest || 0));
   merged.gems = Math.max(0, Number(merged.gems || 0));
   merged.pity = {...fresh.pity, ...(raw.pity || {})};
+  delete merged.pity.Rare;
+  for (const key of ['verseEpic','verseLegendary','verseMythic','featuredEpic','featuredLegendary','featuredMythic','selectionEpic','selectionLegendary','selectionMythic']) merged.pity[key] = Math.max(0, Number(merged.pity[key] || 0));
   merged.cardImages = {...(raw.cardImages || {})};
   return merged;
 }
@@ -343,33 +350,34 @@ function randomOpenSpot(existing) {
   return available[Math.floor(Math.random()*Math.max(1,available.length))] || [12,92];
 }
 
-function rollRarity(pity) {
-  for (let i = RARITIES.length - 1; i >= 2; i--) {
-    const r = RARITIES[i];
-    if (pity[r] + 1 >= PITY[r]) return r;
+function rollRarity(pity, limits=PITY) {
+  for (const r of ['Mythic','Legendary','Epic']) {
+    if (Number(pity[r] || 0) + 1 >= limits[r]) return {rarity:r, forced:true};
   }
   const n = Math.random()*100;
   let sum = 0;
   for (const r of RARITIES) {
     sum += BASE_DROP_RATES[r];
-    if (n < sum) return r;
+    if (n < sum) return {rarity:r, forced:false};
   }
-  return 'Common';
+  return {rarity:'Common',forced:false};
 }
 
-function openPack(pity, count=5, pool=CHARACTERS) {
+function openPack(pity, count=5, pool=CHARACTERS, limits=PITY) {
   const nextPity = {...pity};
   const results = [];
   for (let i=0;i<count;i++) {
-    const rarity = rollRarity(nextPity);
+    const {rarity,forced} = rollRarity(nextPity,limits);
     const rarityPool = pool.filter(c => c.rarity === rarity);
-    const candidates = rarityPool.length ? rarityPool : pool;
-    results.push(candidates[Math.floor(Math.random()*candidates.length)] || CHARACTERS[0]);
-    for (const r of Object.keys(nextPity)) nextPity[r] += 1;
-    if (rarityRank(rarity) >= 2) nextPity.Rare = 0;
-    if (rarityRank(rarity) >= 3) nextPity.Epic = 0;
-    if (rarityRank(rarity) >= 4) nextPity.Legendary = 0;
-    if (rarityRank(rarity) >= 5) nextPity.Mythic = 0;
+    // Never silently substitute a different rarity when a banner has no eligible
+    // character for the rolled rarity. That would invalidate the advertised odds.
+    if (!rarityPool.length) {
+      throw new Error(`No ${rarity} characters are available in this banner. Please try another banner.`);
+    }
+    results.push(rarityPool[Math.floor(Math.random()*rarityPool.length)]);
+    for (const r of Object.keys(PITY)) nextPity[r] = Number(nextPity[r] || 0) + 1;
+    // Lucky drops preserve pity; only a hard-pity guarantee resets its own counter.
+    if (forced) nextPity[rarity] = 0;
   }
   return {results,nextPity};
 }
@@ -405,7 +413,7 @@ function mapDbCharacter(row, base = {}) {
     cost: Number(row.cost ?? base.cost ?? 180),
     baseDamage: Number(row.base_damage ?? base.baseDamage ?? 22),
     range: Number(row.range ?? base.range ?? 110),
-    attackSpeed: Number(row.attack_speed ?? base.attackSpeed ?? 680),
+    attackSpeed: Number(row.attack_speed ?? base.attackSpeed ?? 5),
     role: row.role || base.role || 'attack',
     incomePerWave: Number(row.income_per_wave ?? base.incomePerWave ?? 0),
     buffPercent: Number(row.buff_percent ?? base.buffPercent ?? 0),
@@ -771,8 +779,8 @@ function Collection({save,squad,toggleSquad,setSave,notify,session}) {
                   <div className="char-body">
                     <div className="char-title"><h3>{c.name}</h3><span>{owned}×</span></div>
                     <p>{c.anime}</p>
-                    {c.role === 'money' && <div className="role-badge">💰 INCOME ONLY · +{c.incomePerWave} / WAVE</div>}
-                    {c.role === 'support' && <div className="role-badge support-role-badge">✦ SUPPORT · +{Math.round((c.buffPercent||0.13)*100)}% NEARBY DAMAGE</div>}
+                    {Number(c.incomePerWave||0)>0 && <div className="role-badge">💰 INCOME · +{c.incomePerWave} / WAVE</div>}
+                    {Number(c.buffPercent||0)>0 && <div className="role-badge support-role-badge">✦ BUFF · +{Math.round(c.buffPercent*100)}% NEARBY DAMAGE</div>}
                     <div className="ability-row">{c.abilities.map(a=><span key={a}>{a}</span>)}</div>
                     <div className="card-footer card-footer-wrap">
                       <button className="details-btn" onClick={()=>setDetailId(c.id)}>VIEW STATS</button>
@@ -821,11 +829,11 @@ function Collection({save,squad,toggleSquad,setSave,notify,session}) {
           <section className="stat-modal" role="dialog" aria-modal="true" aria-label={`${c.name} statistics`} onClick={e=>e.stopPropagation()}>
             <button className="stat-modal-close" onClick={()=>setDetailId(null)} aria-label="Close stats">×</button>
             <div className="eyebrow">CHARACTER DOSSIER · FULL UPGRADE PATH</div>
-            <div className="stat-modal-title"><span className="stat-modal-mark" style={{borderColor:RARITY_COLOR[c.rarity],color:RARITY_COLOR[c.rarity]}}>{characterImage(save,c.id)?<img src={characterImage(save,c.id)} alt=""/>:getIcon(c)}</span><div><h2>{c.name}</h2><p>{c.anime} · <b style={{color:RARITY_COLOR[c.rarity]}}>{c.rarity}</b></p><small>{c.role==='money'?'Income unit':c.role==='support'?'Support unit':'Damage unit'} · {maxLevel} total levels</small></div></div>
+            <div className="stat-modal-title"><span className="stat-modal-mark" style={{borderColor:RARITY_COLOR[c.rarity],color:RARITY_COLOR[c.rarity]}}>{characterImage(save,c.id)?<img src={characterImage(save,c.id)} alt=""/>:getIcon(c)}</span><div><h2>{c.name}</h2><p>{c.anime} · <b style={{color:RARITY_COLOR[c.rarity]}}>{c.rarity}</b></p><small>{c.role==='money'?'Money role':c.role==='support'?'Support role':'Attack role'} · {maxLevel} total levels</small></div></div>
             <div className="stat-table-wrap"><table className="level-stats-table"><thead><tr><th>LEVEL</th><th>DMG</th><th>RANGE</th><th>SPA</th><th>DPS</th><th>INCOME / WAVE</th><th>SUPPORT BUFF</th><th>UPGRADE COST</th></tr></thead><tbody>
-              {levels.map((st,i)=><tr key={st.level}><td><b>{st.level}</b><small>{levelStageLabel(st.level)}</small></td><td>{c.role==='money'?'—':Number(st.damage).toLocaleString(undefined,{maximumFractionDigits:1})}</td><td>{c.role==='money'?'—':Number(st.range).toFixed(1)}</td><td>{c.role==='money'?'—':(Number(st.attackSpeed)/1000).toFixed(2)+'s'}</td><td>{c.role==='money'?'—':Math.round(Number(st.damage)/(Math.max(1,Number(st.attackSpeed))/1000)).toLocaleString()}</td><td>{c.role==='money'?'💰 '+Number(st.income||0).toLocaleString():'—'}</td><td>{c.role==='support'?(Number(st.buffPercent||0)*100).toFixed(1)+'%':'—'}</td><td>{st.level===1?'—':'💰 '+Number(st.upgradeCost||0).toLocaleString()}</td></tr>)}
+              {levels.map((st,i)=><tr key={st.level}><td><b>{st.level}</b><small>{levelStageLabel(st.level)}</small></td><td>{Number(st.damage).toLocaleString(undefined,{maximumFractionDigits:1})}</td><td>{Number(st.range).toFixed(1)}</td><td>{Number(st.attackSpeed).toFixed(2)+'s'}</td><td>{Math.round(Number(st.damage)/Math.max(0.01,Number(st.attackSpeed))).toLocaleString()}</td><td>{c.role==='money'?'💰 '+Number(st.income||0).toLocaleString():'—'}</td><td>{c.role==='support'?(Number(st.buffPercent||0)*100).toFixed(1)+'%':'—'}</td><td>{st.level===1?'—':'💰 '+Number(st.upgradeCost||0).toLocaleString()}</td></tr>)}
             </tbody></table></div>
-            <div className="stat-modal-bottom"><div><span className="eyebrow">DEPLOY COST</span><strong>💰 {c.cost}</strong></div><div><span className="eyebrow">BASE DPS</span><strong>{c.role==='money'?'—':Math.round(Number(baseStats.damage)/(Math.max(1,Number(baseStats.attackSpeed))/1000))}</strong></div><div><span className="eyebrow">MAX DPS</span><strong>{c.role==='money'?'—':Math.round(Number(maxStats.damage)/(Math.max(1,Number(maxStats.attackSpeed))/1000))}</strong></div></div>
+            <div className="stat-modal-bottom"><div><span className="eyebrow">DEPLOY COST</span><strong>💰 {c.cost}</strong></div><div><span className="eyebrow">BASE DPS</span><strong>{Math.round(Number(baseStats.damage)/Math.max(0.01,Number(baseStats.attackSpeed)))}</strong></div><div><span className="eyebrow">MAX DPS</span><strong>{Math.round(Number(maxStats.damage)/Math.max(0.01,Number(maxStats.attackSpeed)))}</strong></div></div>
             {c.role==='support' && <p className="stat-footnote">Support aura: nearby damage units gain +{Math.round((c.buffPercent||0.13)*100)}% damage, up to the global support cap.</p>}
             <div className="stat-ability-list"><span className="eyebrow">MOVES & TECHNIQUES</span>{moves.map((move,index)=><div className="stat-move-row" key={`${move.name}-${index}`}><div><b>{move.name}</b><small>Unlocks at Level {Number(move.unlockLevel||[2,4,6][index]||2)} · {Number(move.unlockLevel||[2,4,6][index]||2)<=maxLevel?'Available for this rarity':'Above this rarity’s current cap'}</small></div><span>×{Number(move.damageMultiplier||1).toFixed(2)} damage</span><span>{Number(move.cooldownSeconds||0).toFixed(1)}s cooldown</span><span>{Number(move.splashRadius||0).toFixed(1)} splash</span></div>)}</div>
             <p className="stat-footnote">Damage and range show the exact level values used by the battle system. SPA means seconds per attack. Moves trigger automatically when unlocked and off cooldown.</p>
@@ -843,7 +851,9 @@ function Summon({save,setSave,notify,session}) {
   const [opening, setOpening] = useState(false);
   const [bestReveal, setBestReveal] = useState(false);
   const [showBannerRoster, setShowBannerRoster] = useState(false);
-  const [bannerMode, setBannerMode] = useState('all');
+  const [bannerMode, setBannerMode] = useState('verse');
+  const [selectedMythic, setSelectedMythic] = useState(()=>save.pity?.customSelectedMythic || localStorage.getItem('shonen-siege-selected-mythic') || '');
+  const [selectionChangedAt, setSelectionChangedAt] = useState(()=>Number(save.pity?.customSelectionChangedAt || localStorage.getItem('shonen-siege-selection-changed-at') || 0));
   const [clock, setClock] = useState(Date.now());
   const [skipBest, setSkipBest] = useState(()=>localStorage.getItem('shonen-siege-skip-best')==='true');
   const [sequentialReveal, setSequentialReveal] = useState(()=>localStorage.getItem('shonen-siege-sequential-reveal')!=='false');
@@ -853,33 +863,49 @@ function Summon({save,setSave,notify,session}) {
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const verses = useMemo(() => [...new Set(CHARACTERS.map(c=>c.anime))].sort(), []);
+  const verses = useMemo(() => [...new Set(CHARACTERS.filter(c=>c.rarity==='Mythic').map(c=>c.anime))].sort(), []);
   const activeVerse = getRotatingVerse(clock, verses);
+  const mythics = CHARACTERS.filter(c=>c.rarity==='Mythic' && c.enabled!==false);
+  const featuredSlot = Math.floor(clock / (90 * 60 * 1000));
+  const featuredMythic = mythics.length ? mythics[stableHash(`featured-${featuredSlot}`) % mythics.length] : null;
+  const selectionReadyAt = selectionChangedAt + 12*60*60*1000;
+  const selectionCanChange = !selectionChangedAt || clock >= selectionReadyAt;
+  const selectionRemaining = Math.max(0,selectionReadyAt-clock);
+  const selectionRemainingLabel = `${Math.floor(selectionRemaining/3600000)}h ${Math.floor((selectionRemaining%3600000)/60000)}m`;
   const rotationMs = GAME_BALANCE.verseBannerMinutes * 60 * 1000;
   const remainingMs = rotationMs - (clock % rotationMs);
+  const featuredRemainingMs = 90*60*1000 - (clock % (90*60*1000));
+  const featuredRemainingLabel = `${Math.floor(featuredRemainingMs/60000)}:${String(Math.floor((featuredRemainingMs%60000)/1000)).padStart(2,'0')}`;
   const remainingLabel = `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,'0')}`;
-  const bannerPool = bannerMode === 'all' ? CHARACTERS : CHARACTERS.filter(c=>c.anime===activeVerse);
+  const bannerPool = bannerMode === 'verse' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.anime===activeVerse) : bannerMode === 'featured' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===featuredMythic?.id) : bannerMode === 'selection' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===selectedMythic) : CHARACTERS;
   const pending = !!pack && (reveal.length < pack.length || (sequenceActive && sequenceIndex === pack.length - 1));
   const open = (count) => {
     if (opening || pending) return;
     const cost = count===1 ? SINGLE_COST : count===5 ? FIVE_COST : TEN_COST;
     if (save.gems < cost) return notify(`You need ${cost} gems.`);
-    const pool = bannerMode==='all' ? CHARACTERS : CHARACTERS.filter(c=>c.anime===activeVerse);
-    const bannerLabel = bannerMode==='all' ? 'ALL-UNIT BANNER' : `${activeVerse.toUpperCase()} VERSE BANNER`;
+    const pool = bannerPool;
+    if (bannerMode==='selection' && !selectedMythic) return notify('Choose your Mythic first.');
+    const bannerLabel = bannerMode==='verse' ? `${activeVerse.toUpperCase()} VERSE BANNER` : bannerMode==='featured' ? `FEATURED MYTHIC · ${featuredMythic?.name||''}` : bannerMode==='selection' ? `CUSTOM MYTHIC · ${getChar(selectedMythic)?.name||''}` : 'ALL-UNIT BANNER';
     setOpening(true);
     setTimeout(async () => {
       try {
         let results, nextSave;
         if (session) {
-          const serverResult = await rpc(session,'perform_summon',{p_count:count,p_verse:bannerMode==='verse'?activeVerse:null});
+          const serverResult = await rpc(session,'perform_summon_v2',{p_count:count,p_verse:bannerMode==='verse'?activeVerse:null,p_banner_type:bannerMode,p_selected_mythic:bannerMode==='featured'?featuredMythic?.id:bannerMode==='selection'?selectedMythic:null});
           results = (serverResult.cards||[]).map(row=>getChar(row.id)||row);
           nextSave = normalizeSave(serverResult.save);
         } else {
-          const result = openPack(save.pity,count,pool);
+          const pityKey = bannerMode==='verse'?'verse':bannerMode==='featured'?'featured':bannerMode==='selection'?'selection':'all';
+          const scopedPity = pityKey==='all'?save.pity:{Epic:save.pity[`${pityKey}Epic`]||0,Legendary:save.pity[`${pityKey}Legendary`]||0,Mythic:save.pity[`${pityKey}Mythic`]||0};
+          const limits={...PITY,Mythic:pityKey==='selection'?400:PITY.Mythic};
+          const result = openPack(scopedPity,count,pool,limits);
           results = result.results;
           const owned = {...save.owned};
           results.forEach(c=>owned[c.id]=(owned[c.id]||0)+1);
-          nextSave = {...save,gems:save.gems-cost,owned,pity:result.nextPity};
+          const updatedPity = {...save.pity};
+          if (pityKey==='all') Object.assign(updatedPity,result.nextPity);
+          else for (const rarity of ['Epic','Legendary','Mythic']) updatedPity[`${pityKey}${rarity}`]=result.nextPity[rarity];
+          nextSave = {...save,gems:save.gems-cost,owned,pity:updatedPity};
         }
         setSave(nextSave);
         setPack(results);
@@ -917,16 +943,19 @@ function Summon({save,setSave,notify,session}) {
         <div className="big-gem">💎 {save.gems.toLocaleString()}</div>
       </div>
       <div className="banner-selector" role="tablist" aria-label="Summon banners">
-        <button role="tab" aria-selected={bannerMode==='all'} className={bannerMode==='all'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('all');setShowBannerRoster(false);}}>
-          <span className="eyebrow">PERMANENT BANNER</span><strong>ALL-UNIT BANNER</strong><small>Every character · {CHARACTERS.length} units</small>
-        </button>
         <button role="tab" aria-selected={bannerMode==='verse'} className={bannerMode==='verse'?'banner-option verse-option active':'banner-option verse-option'} disabled={pending||opening} onClick={()=>{setBannerMode('verse');setShowBannerRoster(false);}}>
-          <span className="eyebrow">ROTATING BANNER</span><strong>{activeVerse.toUpperCase()}</strong><small>{bannerPool.length} units · changes in {remainingLabel}</small>
+          <span className="eyebrow">ROTATING · VERSE</span><strong>{activeVerse.toUpperCase()}</strong><small>Verse Mythics · changes in {remainingLabel}</small>
+        </button>
+        <button role="tab" aria-selected={bannerMode==='featured'} className={bannerMode==='featured'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('featured');setShowBannerRoster(false);}}>
+          <span className="eyebrow">ROTATING · 90 MIN</span><strong>{featuredMythic?.name || 'FEATURED MYTHIC'}</strong><small>One featured Mythic · changes in {featuredRemainingLabel}</small>
+        </button>
+        <button role="tab" aria-selected={bannerMode==='selection'} className={bannerMode==='selection'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('selection');setShowBannerRoster(false);}}>
+          <span className="eyebrow">CUSTOM · 12 HOURS</span><strong>MYTHIC SELECTION</strong><small>400 Mythic pity · {selectedMythic?getChar(selectedMythic)?.name:'Choose a Mythic'}</small>
         </button>
       </div>
       <div className="summon-layout">
         <section className="panel summon-stage">
-          <div className="summon-copy"><div className="eyebrow">{bannerMode==='all'?'ALL-UNIT BANNER':`${activeVerse.toUpperCase()} VERSE BANNER`}</div><h2>OPEN THE GATE.</h2><p>{bannerMode==='all'?'Summon from the full roster of all anime verses.':'Summon only characters from the featured verse. This verse rotates every 45 minutes.'} Duplicates are kept, and higher rarities have lower base rates.</p></div>
+          <div className="summon-copy"><div className="eyebrow">{bannerMode==='verse'?`${activeVerse.toUpperCase()} VERSE BANNER`:bannerMode==='featured'?'FEATURED MYTHIC BANNER':bannerMode==='selection'?'CUSTOM MYTHIC SELECTION':'ALL-UNIT BANNER'}</div><h2>OPEN THE GATE.</h2><p>{bannerMode==='verse'?'Only the Mythic pool is restricted to this featured verse; lower rarities use the full roster.':bannerMode==='featured'?'Only the featured Mythic can drop at Mythic rarity; lower rarities use the full roster.':bannerMode==='selection'?'Choose one Mythic to target. Lower rarities remain available; only your selected Mythic can drop.':'Summon from the full roster.'} Duplicates are kept.</p>{bannerMode==='selection' && <div className="selection-controls"><label>Choose your Mythic<select value={selectedMythic} disabled={!selectionCanChange || opening || pending} onChange={async e=>{const id=e.target.value;if(!id)return;try{let changedAt=Date.now();if(session){const result=await rpc(session,'set_custom_mythic_selection',{p_character_id:id});changedAt=Number(result.changedAt||changedAt);}setSelectedMythic(id);localStorage.setItem('shonen-siege-selected-mythic',id);setSelectionChangedAt(changedAt);localStorage.setItem('shonen-siege-selection-changed-at',String(changedAt));}catch(err){notify(err.message||'Could not change Mythic selection.');}}}><option value="">Select a Mythic…</option>{mythics.map(c=><option key={c.id} value={c.id}>{c.name} · {c.anime}</option>)}</select></label><small>{selectionCanChange?'You can change your selection now.':`Selection locked for ${selectionRemainingLabel}.`}</small></div>}</div>
           <div className="pack-visual"><div className="pack-glow"></div><div className="pack-mark">🎴</div><div className="pack-name">SHONEN<br/><b>SIEGE</b></div></div>
           <div className="summon-buttons">
             <button className="secondary" disabled={opening||pending} onClick={()=>open(1)}>{opening?'SUMMONING...':'SUMMON 1 — 💎 100'}</button>
@@ -953,7 +982,7 @@ function Summon({save,setSave,notify,session}) {
           {bestReveal && pack && <div className="best-reveal-backdrop"><section className="best-reveal-modal"><div className="eyebrow">HIGHLIGHT CARD</div><div className={`best-card-art ${pack[bestCard].rarity.toLowerCase()}`}>{characterImage(save,pack[bestCard].id)?<img src={characterImage(save,pack[bestCard].id)} alt=""/>:<strong>{getIcon(pack[bestCard])}</strong>}</div><span className="mini-rarity" style={{color:RARITY_COLOR[pack[bestCard].rarity]}}>{pack[bestCard].rarity}</span><h2>{pack[bestCard].name}</h2><p>{pack[bestCard].anime}</p><button className="primary" onClick={showRest}>SHOW THE REST</button></section></div>}
         </section>
         <aside className="panel pity-side"><div className="eyebrow">PITY TRACKER</div>
-          {['Rare','Epic','Legendary','Mythic'].map(r=><div className="pity-row" key={r}><div><span style={{color:RARITY_COLOR[r]}}>{r}</span><b>{save.pity[r]}/{PITY[r]}</b></div><div className="progress"><i style={{width:`${Math.min(100,save.pity[r]/PITY[r]*100)}%`,background:RARITY_COLOR[r]}}/></div></div>)}
+          {['Epic','Legendary','Mythic'].map(r=>{const key=bannerMode==='verse'?'verse':bannerMode==='featured'?'featured':bannerMode==='selection'?'selection':'all';const limit=bannerMode==='selection'&&r==='Mythic'?400:PITY[r];const value=Number(save.pity[key==='all'?r:`${key}${r}`]||0);return <div className="pity-row" key={r}><div><span style={{color:RARITY_COLOR[r]}}>{r}</span><b>{value}/{limit}</b></div><div className="progress"><i style={{width:`${Math.min(100,value/limit*100)}%`,background:RARITY_COLOR[r]}}/></div></div>})}
           <div className="drop-rate-box"><div className="eyebrow">BASE RATES</div>{RARITIES.map(r=><div className="drop-line" key={r}><span><i style={{background:RARITY_COLOR[r]}}></i>{r}</span><b>{BASE_DROP_RATES[r]}%</b></div>)}</div>
           <div className="rule-box"><b>Duplicate sell values</b><div>{RARITIES.map(r=><span key={r}>{r}: 💎 {[8,12,20,35,60,100][rarityRank(r)]}</span>)}</div></div>
         </aside>
@@ -1044,9 +1073,9 @@ function Infinite({save,setSave,squad,setPage,notify,session}) {
         }
 
         // Units attack. Units never depend on nested React state updates.
-        const units = current.units.map(u => ({...u, cooldown:Math.max(0,u.cooldown-dt*1000), moveCooldowns:(u.moveCooldowns||characterMoves(u.card).map(()=>0)).map(n=>Math.max(0,Number(n||0)-dt))}));
+        const units = current.units.map(u => ({...u, cooldown:Math.max(0,u.cooldown-dt), moveCooldowns:(u.moveCooldowns||characterMoves(u.card).map(()=>0)).map(n=>Math.max(0,Number(n||0)-dt))}));
         for (const u of units) {
-          if (u.card.role === 'money') continue;
+          if (u.card.role === 'money' && !(Number(u.card.baseDamage)>0 && Number(u.card.attackSpeed)>0)) continue;
           if (u.cooldown > 0) continue;
           const upos = {x:u.x,y:u.y};
           const candidates = remaining.filter(e => {
@@ -1057,7 +1086,7 @@ function Infinite({save,setSave,squad,setPage,notify,session}) {
           }).sort((a,b)=>b.progress-a.progress);
           const target = candidates[0];
           if (!target) continue;
-          const supportBonus = units.filter(support => support !== u && support.card.role === 'support' && distancePct(support.x,support.y,u.x,u.y) <= support.rangePct)
+          const supportBonus = units.filter(support => support !== u && Number(characterLevelStats(support.card,support.level).buffPercent ?? support.card.buffPercent ?? 0) > 0 && distancePct(support.x,support.y,u.x,u.y) <= support.rangePct)
             .reduce((sum,support) => sum + Math.max(0,Number(characterLevelStats(support.card,support.level).buffPercent ?? support.card.buffPercent ?? 0.13)), 0);
           const moves = characterMoves(u.card);
           let moveIndex = -1;
@@ -1143,7 +1172,7 @@ function Infinite({save,setSave,squad,setPage,notify,session}) {
       damage:Number(baseStats.damage||0),
       rangePct:Number(baseStats.range||0),
       attackSpeed:Number(baseStats.attackSpeed||0),
-      cooldown:card.role === 'money' ? 0 : 120,
+      cooldown:0,
       moveCooldowns:characterMoves(card).map(()=>0),
     };
     setRun(r=>({...r,cash:r.cash-card.cost,units:[...r.units,unit]}));
@@ -1269,7 +1298,7 @@ function Infinite({save,setSave,squad,setPage,notify,session}) {
               {characterImage(save,u.card.id)?<img src={characterImage(save,u.card.id)} alt=""/>:<span>{getIcon(u.card)}</span>}
               <small>{u.card.role==='money'?`Lv.${u.level} 💰`:`Lv.${u.level}/${UPGRADE_LIMIT[u.card.rarity]}`}</small>
             </button>)}
-            {selectedUnitData && selectedUnitData.card.role !== 'money' && <div className={`range-ring ${selectedUnitData.card.role==='support'?'support-range-ring':''}`} style={{left:`${selectedUnitData.x}%`,top:`${selectedUnitData.y}%`,width:`${selectedUnitData.rangePct*2}%`,height:`${selectedUnitData.rangePct*2}%`,borderColor:RARITY_COLOR[selectedUnitData.card.rarity]}}/>}
+            {selectedUnitData && Number(selectedUnitData.card.baseDamage)>0 && Number(selectedUnitData.card.attackSpeed)>0 && <div className={`range-ring ${selectedUnitData.card.role==='support'?'support-range-ring':''}`} style={{left:`${selectedUnitData.x}%`,top:`${selectedUnitData.y}%`,width:`${selectedUnitData.rangePct*2}%`,height:`${selectedUnitData.rangePct*2}%`,borderColor:RARITY_COLOR[selectedUnitData.card.rarity]}}/>}
 
             {run.status==='warning' && <div className={`wave-banner ${run.messageKind==='boss'?'boss':''}`}>{run.message}</div>}
             {run.status==='active' && run.messageKind==='clear' && <div className="wave-banner clear">{run.message}</div>}
@@ -1281,8 +1310,8 @@ function Infinite({save,setSave,squad,setPage,notify,session}) {
           {selectedUnitData && <div className="selected-unit-panel">
             <div className="selected-unit-head"><div><div className="eyebrow">SELECTED UNIT</div><h3>{selectedUnitData.card.name}</h3><span>{selectedUnitData.card.rarity} • Level {selectedUnitData.level}/{UPGRADE_LIMIT[selectedUnitData.card.rarity]}</span></div><button className="text-btn" onClick={()=>setSelectedUnit(null)}>CLOSE</button></div>
             <div className="unit-stat-preview">
-              {selectedUnitData.card.role === 'money' ? <div><span>CURRENT INCOME</span><b>💰 {unitIncome(selectedUnitData)} / WAVE</b><small>Level {selectedUnitData.level} · income-only unit</small></div> : <div><span>CURRENT</span><b>DMG {Math.round(selectedUnitData.damage)}</b><small>RANGE {selectedUnitData.rangePct.toFixed(1)} · SPA {(selectedUnitData.attackSpeed/1000).toFixed(2)}s</small>{selectedUnitData.lastMove&&<em>Last technique: {selectedUnitData.lastMove}</em>}</div>}
-              {selectedUnitData.level < UPGRADE_LIMIT[selectedUnitData.card.rarity] && (()=>{const next=characterLevelStats(selectedUnitData.card,selectedUnitData.level+1);const move=characterMoves(selectedUnitData.card).find(m=>Number(m.unlockLevel)===selectedUnitData.level+1);return <div><span>NEXT LEVEL · {levelStageLabel(selectedUnitData.level+1)}</span><b>{selectedUnitData.card.role==='money'?`💰 ${Math.round(next.income)} / WAVE`:`DMG ${Math.round(next.damage)} · RANGE ${Number(next.range).toFixed(1)}`}</b><small>{selectedUnitData.card.role==='money'?`+💰 ${Math.round(next.income-unitIncome(selectedUnitData))} / wave`:`SPA ${(Number(next.attackSpeed)/1000).toFixed(2)}s · DPS ${Math.round(Number(next.damage)/(Math.max(1,Number(next.attackSpeed))/1000))}`}</small>{move&&<em>Technique unlock: {move.name}</em>}{selectedUnitData.card.role==='support'&&<em>Support buff: {(Number(next.buffPercent||0)*100).toFixed(1)}%</em>}</div>})()}
+              <div><span>CURRENT STATS</span><b>DMG {Math.round(selectedUnitData.damage)} · DPS {selectedUnitData.attackSpeed>0?Math.round(selectedUnitData.damage/selectedUnitData.attackSpeed):0}</b><small>RANGE {selectedUnitData.rangePct.toFixed(1)} · SPA {Number(selectedUnitData.attackSpeed).toFixed(2)}s{unitIncome(selectedUnitData)>0?` · INCOME ${unitIncome(selectedUnitData)}/WAVE`:''}</small>{selectedUnitData.lastMove&&<em>Last technique: {selectedUnitData.lastMove}</em>}</div>
+              {selectedUnitData.level < UPGRADE_LIMIT[selectedUnitData.card.rarity] && (()=>{const next=characterLevelStats(selectedUnitData.card,selectedUnitData.level+1);const move=characterMoves(selectedUnitData.card).find(m=>Number(m.unlockLevel)===selectedUnitData.level+1);return <div><span>NEXT LEVEL · {levelStageLabel(selectedUnitData.level+1)}</span><b>{Number(selectedUnitData.card.baseDamage)>0&&Number(selectedUnitData.card.attackSpeed)>0?`DMG ${Math.round(next.damage)} · RANGE ${Number(next.range).toFixed(1)}`:`💰 ${Math.round(next.income)} / WAVE`}</b><small>{Number(selectedUnitData.card.baseDamage)>0&&Number(selectedUnitData.card.attackSpeed)>0?`SPA ${Number(next.attackSpeed).toFixed(2)}s · DPS ${Math.round(Number(next.damage)/Math.max(0.01,Number(next.attackSpeed)))}`:`+💰 ${Math.round(next.income-unitIncome(selectedUnitData))} / wave`}</small>{move&&<em>Technique unlock: {move.name}</em>}{Number(next.buffPercent||0)>0&&<em>Support buff: {(Number(next.buffPercent||0)*100).toFixed(1)}%</em>}</div>})()}
             </div>
             <div className="selected-actions">
               <button className="primary" disabled={selectedUnitData.level >= UPGRADE_LIMIT[selectedUnitData.card.rarity]} onClick={()=>upgrade(selectedUnit)}>UPGRADE — 💰 {selectedUnitData.level>=UPGRADE_LIMIT[selectedUnitData.card.rarity]?'MAX':Math.round(characterLevelStats(selectedUnitData.card,selectedUnitData.level+1).upgradeCost||0)}</button>

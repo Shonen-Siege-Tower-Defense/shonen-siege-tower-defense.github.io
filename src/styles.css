@@ -141,7 +141,7 @@ radial-gradient(circle at 50% 50%,#151c27,#0b0e16 72%);background-size:34px 34px
 
 
 /* V3.3 — rotating verse banners, configurable art, hills and role-specific UI */
-.banner-selector{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 0 16px}
+.banner-selector{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 16px}
 .banner-option{display:flex;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;padding:16px 18px;background:#111725;border:1px solid #303a50;border-radius:14px;color:#dfe6f4;transition:border-color .15s,background .15s}
 .banner-option strong{font-size:15px;letter-spacing:.05em}.banner-option small{color:#939fb2;font-size:11px}.banner-option.active{border-color:#a28aff;background:linear-gradient(135deg,#211a43,#151b2a);box-shadow:inset 0 0 0 1px #8c73ff25}.verse-option.active{border-color:#71d5b0;background:linear-gradient(135deg,#18382f,#151b2a)}
 .banner-roster-actions{margin:12px 0 0}.banner-roster{margin-top:10px;padding:14px;border:1px solid #2b3548;border-radius:12px;background:#0b1019;text-align:left}.banner-pool-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;margin-top:10px;max-height:350px;overflow:auto}.banner-pool-card{display:flex;flex-direction:column;gap:4px;padding:9px 10px;background:#141b29;border:1px solid #283348;border-radius:9px;min-width:0}.banner-pool-card span{font-size:9px;text-transform:uppercase;font-weight:950}.banner-pool-card b{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.banner-pool-card small{font-size:9px;color:#8d99ad;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -192,3 +192,7 @@ radial-gradient(circle at 50% 50%,#151c27,#0b0e16 72%);background-size:34px 34px
 .enemy-token.strong-1 .enemy-icon{border-color:#e7a454;color:#ffe0a9;background:linear-gradient(145deg,#854526,#352128);box-shadow:0 0 12px #ec913b44}
 .enemy-token.strong-2 .enemy-icon{width:46px;height:46px;border-color:#fb7088;color:#fff0f3;background:linear-gradient(145deg,#922b4e,#271525);box-shadow:0 0 20px #f84e784d}
 .enemy-name-tag{display:block;max-width:110px;margin:2px auto 0;padding:2px 5px;border:1px solid #4b5870;border-radius:5px;background:#080d16e8;color:#edf2fc;font-size:8px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* V3.6 banner selection controls */
+.selection-controls{display:grid;gap:7px;max-width:360px;margin-top:14px;padding:12px;border:1px solid #39435a;border-radius:10px;background:#0d1420}.selection-controls label{display:grid;gap:7px;color:#b9c5d8;font-size:11px;font-weight:800}.selection-controls select{width:100%;background:#0a101a;color:#ecf1fb;border:1px solid #303b51;border-radius:8px;padding:10px}.selection-controls small{color:#a6b2c7;font-size:11px}
+@media(max-width:780px){.banner-selector{grid-template-columns:1fr}}
