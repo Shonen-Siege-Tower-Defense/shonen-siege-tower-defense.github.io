@@ -394,7 +394,7 @@ function stableHash(value) {
 }
 function getRotatingVerse(now, verses) {
   if (!verses.length) return 'Naruto';
-  const slotLength = GAME_BALANCE.verseBannerMinutes * 60 * 1000;
+  const slotLength = Math.max(1,Number(SUMMON_CONFIG.verseMinutes)||Number(GAME_BALANCE.verseBannerMinutes)||45) * 60 * 1000;
   const slot = Math.floor(now / slotLength);
   let index = stableHash(`verse-${slot}`) % verses.length;
   if (slot > 0 && verses.length > 1) {
@@ -890,6 +890,8 @@ function Summon({save,setSave,notify,session}) {
     const cost = Number(count===1?SUMMON_CONFIG.prices.single:count===5?SUMMON_CONFIG.prices.five:SUMMON_CONFIG.prices.ten);
     if (save.gems < cost) return notify(`You need ${cost} gems.`);
     const pool = bannerPool;
+    const mythicEligible = pool.some(c=>c.rarity==='Mythic');
+    if (!mythicEligible) return notify('There are no eligible Mythic characters in this banner. Please choose another banner or enable a Mythic in Admin.');
     if (bannerMode==='selection' && !selectedMythic) return notify('Choose your Mythic first.');
     const bannerLabel = bannerMode==='verse' ? `${activeVerse.toUpperCase()} VERSE BANNER` : bannerMode==='featured' ? `FEATURED MYTHIC · ${featuredMythic?.name||''}` : bannerMode==='selection' ? `CUSTOM MYTHIC · ${getChar(selectedMythic)?.name||''}` : 'ALL-UNIT BANNER';
     setOpening(true);
