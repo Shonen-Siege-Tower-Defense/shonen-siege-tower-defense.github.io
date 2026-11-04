@@ -10,6 +10,7 @@ const rarityIndex = rarity => ['Common','Uncommon','Rare','Epic','Legendary','My
 const levelLabel = level => level===1?'Base':`Upgrade ${level-1}`;
 const clone = value => JSON.parse(JSON.stringify(value));
 const makeCombatDefaults = () => clone(DEFAULT_COMBAT_BALANCE);
+const makeSummonDefaults = () => ({verseMinutes:45,featuredMinutes:90,prices:{single:100,five:450,ten:900},bannerImage:'',characterEligibility:{}});
 function normalizedChar(c) { return c ? {...c,baseDamage:Number(c.baseDamage ?? c.base_damage ?? 22),range:Number(c.range ?? 110),attackSpeed:Number(c.attackSpeed ?? c.attack_speed ?? 5),incomePerWave:Number(c.incomePerWave ?? c.income_per_wave ?? 0),buffPercent:Number(c.buffPercent ?? c.buff_percent ?? 0),abilities:Array.isArray(c.abilities)?c.abilities:[]} : null; }
 function defaultLevelRows(c, gameBalance) {
   if (!c) return []; const max=MAX_LEVEL[c.rarity]||1, rank=Math.max(0,rarityIndex(c.rarity));
@@ -181,6 +182,7 @@ export function AdminPage({session,profile,characters,gameBalance,enemyBalance,o
   const [charForm,setCharForm] = useState(emptyCharacter());
   const [enemyForm,setEnemyForm] = useState({id:'normal',name:'Normal',hp:78,hp_per_wave:0,speed:.032,base_damage:34,armor:0,shield:0,regen:0,art_url:'',enabled:true});
   const [combatConfig,setCombatConfig] = useState(makeCombatDefaults);
+  const [summonConfig,setSummonConfig] = useState(makeSummonDefaults);
   const [balanceCharacterId,setBalanceCharacterId] = useState('');
   const [selectedWave,setSelectedWave] = useState(1);
   const [waveDraft,setWaveDraft] = useState({hp:78,speed:.032,damage:34,armor:0,shield:0,regen:0});
@@ -207,6 +209,8 @@ export function AdminPage({session,profile,characters,gameBalance,enemyBalance,o
         tableRequest(session,'game_settings','select=key,value'),
       ]);
       const savedCombat=asArray(settings).find(row=>row.key==='combat_balance')?.value;
+      const savedSummon=asArray(settings).find(row=>row.key==='summon_config')?.value;
+      setSummonConfig({...makeSummonDefaults(),...(savedSummon||{}),prices:{...makeSummonDefaults().prices,...(savedSummon?.prices||{})},characterEligibility:savedSummon?.characterEligibility||{}});
       const loadedCombat=makeCombatDefaults();
       if (savedCombat && typeof savedCombat==='object') {
         loadedCombat.characters={...loadedCombat.characters,...(savedCombat.characters||{})};
@@ -362,6 +366,8 @@ export function AdminPage({session,profile,characters,gameBalance,enemyBalance,o
     finally { setBusy(false); }
   };
 
+  const saveSummonConfig = async (next=summonConfig) => { setBusy(true); try { await tableRequest(session,'game_settings','on_conflict=key',{method:'POST',body:[{key:'summon_config',value:next}],prefer:'resolution=merge-duplicates,return=minimal'}); setSummonConfig(next); await onConfigChanged(); notify('Summon banner settings saved. Refresh the game to apply them.'); } catch(e) { notify(`Summon settings failed: ${errText(e)}`); } finally { setBusy(false); } };
+
   const artUpload = async (file, kind) => {
     const id=kind==='character'?charForm.id:enemyForm.id;
     if (!file || !id) return;
@@ -382,8 +388,9 @@ export function AdminPage({session,profile,characters,gameBalance,enemyBalance,o
     {loadError && <div className="inline-error">Could not load admin data: {loadError}</div>}
     <section className="panel admin-toolbar"><button className="primary" onClick={seedCatalog} disabled={busy}>{busy?'PUBLISHING…':'PUBLISH / REFRESH DEFAULT ROSTER'}</button><button className="secondary" onClick={load} disabled={busy}>REFRESH ADMIN DATA</button><span className="muted">First-time setup: publish the built-in roster before summoning.</span></section>
     <div className="admin-tabs">
-      { [['players','Players & Gems'],['characters','Characters & Art'],['balancing','Upgrade & Move Balance'],['enemies','Enemies & Bosses']].map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>) }
+      { [['players','Players & Gems'],['characters','Characters & Art'],['balancing','Upgrade & Move Balance'],['enemies','Enemies & Bosses'],['summoning','Summoning']].map(([id,label])=><button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>) }
     </div>
+    {tab==='summoning' && <section className="panel admin-section"><div className="section-head"><div><div className="eyebrow">SUMMON SYSTEM</div><h2>Banner settings</h2><p className="muted">Configure the banner display and player-facing settings. Server-side summon odds, pity and gem deductions still require the matching database function update before those controls can affect logged-in summons.</p></div></div><div className="admin-form-grid"><label>Verse rotation (minutes)<input type="number" min="1" max="10080" value={summonConfig.verseMinutes} onChange={e=>setSummonConfig(v=>({...v,verseMinutes:Math.max(1,Number(e.target.value)||1)}))}/></label><label>Featured rotation (minutes)<input type="number" min="1" max="10080" value={summonConfig.featuredMinutes} onChange={e=>setSummonConfig(v=>({...v,featuredMinutes:Math.max(1,Number(e.target.value)||1)}))}/></label><label>1 summon price (gems)<input type="number" min="0" value={summonConfig.prices.single} onChange={e=>setSummonConfig(v=>({...v,prices:{...v.prices,single:Math.max(0,Number(e.target.value)||0)}}))}/></label><label>5 summons price (gems)<input type="number" min="0" value={summonConfig.prices.five} onChange={e=>setSummonConfig(v=>({...v,prices:{...v.prices,five:Math.max(0,Number(e.target.value)||0)}}))}/></label><label>10 summons price (gems)<input type="number" min="0" value={summonConfig.prices.ten} onChange={e=>setSummonConfig(v=>({...v,prices:{...v.prices,ten:Math.max(0,Number(e.target.value)||0)}}))}/></label><label className="span-2">Centre banner image URL<input value={summonConfig.bannerImage||''} onChange={e=>setSummonConfig(v=>({...v,bannerImage:e.target.value}))} placeholder="Paste a public image URL"/></label>{summonConfig.bannerImage&&<div className="art-preview span-2"><img src={summonConfig.bannerImage} alt="Summon banner preview"/><span>Summon banner preview</span></div>}</div><h3 className="balance-subtitle">Character banner eligibility</h3><p className="muted">Untick a banner to exclude a character from that banner. Global character enable/disable still applies.</p><div className="stat-table-wrap"><table><thead><tr><th>Character</th><th>All</th><th>Verse</th><th>Featured</th><th>Custom</th></tr></thead><tbody>{balanceCharacters.map(ch=>{const flags=summonConfig.characterEligibility?.[ch.id]||{};return <tr key={ch.id}><td>{ch.name}<small>{ch.rarity} · {ch.anime}</small></td>{['all','verse','featured','selection'].map(key=><td key={key}><input type="checkbox" aria-label={`${ch.name} ${key} banner`} checked={flags[key]!==false} onChange={e=>setSummonConfig(v=>({...v,characterEligibility:{...(v.characterEligibility||{}),[ch.id]:{...(v.characterEligibility?.[ch.id]||{}),[key]:e.target.checked}}}))}/></td>)}</tr>})}</tbody></table></div><div className="balance-save-row"><button className="primary" disabled={busy} onClick={()=>saveSummonConfig()}>{busy?'SAVING…':'SAVE SUMMON SETTINGS'}</button></div></section>}
     {tab==='players' && <section className="panel admin-section">
       <div className="section-head"><div><div className="eyebrow">PLAYER ACCOUNTS</div><h2>Manage player saves</h2></div><span>{players.length} accounts</span></div>
       <input className="admin-search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search username, email or player ID" />
