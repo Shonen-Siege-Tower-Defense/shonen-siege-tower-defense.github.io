@@ -8,6 +8,7 @@ import { isBackendConfigured, restoreSession, getProfile, rpc, fetchPublicConfig
 let GAME_BALANCE = { ...BASE_GAME_BALANCE, rarityDefaults: { ...BASE_GAME_BALANCE.rarityDefaults } };
 let ENEMY_BALANCE = JSON.parse(JSON.stringify(BASE_ENEMY_BALANCE));
 let COMBAT_BALANCE = JSON.parse(JSON.stringify(BASE_COMBAT_BALANCE));
+let SUMMON_CONFIG = {verseMinutes:60,featuredMinutes:90,prices:{single:100,five:450,ten:900},bannerImage:'',characterEligibility:{}};
 let ENEMY_NAMES = {};
 const DEFAULT_ENEMY_NAMES = {normal:'Normal',fast:'Fast',tank:'Tank',regen:'Regenerator',shield:'Shielded',armored:'Armoured',flying:'Flyer','strong-1':'Strong Enemy 1','strong-2':'Strong Enemy 2'};
 let CHARACTER_ART = { ...BASE_CHARACTER_ART };
@@ -393,7 +394,7 @@ function stableHash(value) {
 }
 function getRotatingVerse(now, verses) {
   if (!verses.length) return 'Naruto';
-  const slotLength = GAME_BALANCE.verseBannerMinutes * 60 * 1000;
+  const slotLength = Math.max(1,Number(SUMMON_CONFIG.verseMinutes)||Number(GAME_BALANCE.verseBannerMinutes)||60) * 60 * 1000;
   const slot = Math.floor(now / slotLength);
   let index = stableHash(`verse-${slot}`) % verses.length;
   if (slot > 0 && verses.length > 1) {
@@ -428,6 +429,8 @@ function applyRemoteConfig({characters=[], enemies=[], settings=[]}) {
     if (row?.value && typeof row.value === 'object') {
       GAME_BALANCE = { ...GAME_BALANCE, ...row.value, rarityDefaults: { ...GAME_BALANCE.rarityDefaults, ...(row.value.rarityDefaults || {}) } };
     }
+    const summonRow = settings.find(s => s.key === 'summon_config');
+    if (summonRow?.value && typeof summonRow.value === 'object') SUMMON_CONFIG = {...SUMMON_CONFIG,...summonRow.value,prices:{...SUMMON_CONFIG.prices,...(summonRow.value.prices||{})},characterEligibility:summonRow.value.characterEligibility||{}};
     const combatRow = settings.find(s => s.key === 'combat_balance');
     if (combatRow?.value && typeof combatRow.value === 'object') {
       const remoteCombat = combatRow.value;
@@ -863,27 +866,36 @@ function Summon({save,setSave,notify,session}) {
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const verses = useMemo(() => [...new Set(CHARACTERS.filter(c=>c.rarity==='Mythic').map(c=>c.anime))].sort(), []);
+  const eligibleCharacters = CHARACTERS.filter(c=>c.enabled!==false);
+  const mythics = eligibleCharacters.filter(c=>c.rarity==='Mythic');
+  const bannerEligibility = SUMMON_CONFIG.characterEligibility || {};
+  const verseMythics = mythics.filter(c=>(bannerEligibility[c.id]||{}).verse!==false);
+  const featuredMythics = mythics.filter(c=>(bannerEligibility[c.id]||{}).featured!==false);
+  const selectionMythics = mythics.filter(c=>(bannerEligibility[c.id]||{}).selection!==false);
+  const verses = [...new Set(verseMythics.map(c=>c.anime))].sort();
   const activeVerse = getRotatingVerse(clock, verses);
-  const mythics = CHARACTERS.filter(c=>c.rarity==='Mythic' && c.enabled!==false);
-  const featuredSlot = Math.floor(clock / (90 * 60 * 1000));
-  const featuredMythic = mythics.length ? mythics[stableHash(`featured-${featuredSlot}`) % mythics.length] : null;
+  const featuredDurationMs = Math.max(1,Number(SUMMON_CONFIG.featuredMinutes)||90)*60*1000;
+  const featuredSlot = Math.floor(clock / featuredDurationMs);
+  const featuredMythic = featuredMythics.length ? featuredMythics[stableHash(`featured-${featuredSlot}`) % featuredMythics.length] : null;
   const selectionReadyAt = selectionChangedAt + 12*60*60*1000;
   const selectionCanChange = !selectionChangedAt || clock >= selectionReadyAt;
   const selectionRemaining = Math.max(0,selectionReadyAt-clock);
   const selectionRemainingLabel = `${Math.floor(selectionRemaining/3600000)}h ${Math.floor((selectionRemaining%3600000)/60000)}m`;
-  const rotationMs = GAME_BALANCE.verseBannerMinutes * 60 * 1000;
+  const rotationMs = Math.max(1,Number(SUMMON_CONFIG.verseMinutes)||Number(GAME_BALANCE.verseBannerMinutes)||60) * 60 * 1000;
   const remainingMs = rotationMs - (clock % rotationMs);
-  const featuredRemainingMs = 90*60*1000 - (clock % (90*60*1000));
+  const featuredRemainingMs = featuredDurationMs - (clock % featuredDurationMs);
   const featuredRemainingLabel = `${Math.floor(featuredRemainingMs/60000)}:${String(Math.floor((featuredRemainingMs%60000)/1000)).padStart(2,'0')}`;
   const remainingLabel = `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,'0')}`;
-  const bannerPool = bannerMode === 'verse' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.anime===activeVerse) : bannerMode === 'featured' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===featuredMythic?.id) : bannerMode === 'selection' ? CHARACTERS.filter(c=>c.rarity!=='Mythic' || c.id===selectedMythic) : CHARACTERS;
+  const bannerKey = bannerMode==='selection'?'selection':bannerMode;
+  const bannerPool = eligibleCharacters.filter(c=>{const flags=SUMMON_CONFIG.characterEligibility?.[c.id]||{};if(flags[bannerKey]===false)return false;if(c.rarity!=='Mythic')return true;if(bannerMode==='verse')return c.anime===activeVerse;if(bannerMode==='featured')return c.id===featuredMythic?.id;if(bannerMode==='selection')return c.id===selectedMythic;return true;});
   const pending = !!pack && (reveal.length < pack.length || (sequenceActive && sequenceIndex === pack.length - 1));
   const open = (count) => {
     if (opening || pending) return;
-    const cost = count===1 ? SINGLE_COST : count===5 ? FIVE_COST : TEN_COST;
+    const cost = Number(count===1?SUMMON_CONFIG.prices.single:count===5?SUMMON_CONFIG.prices.five:SUMMON_CONFIG.prices.ten);
     if (save.gems < cost) return notify(`You need ${cost} gems.`);
     const pool = bannerPool;
+    const mythicEligible = pool.some(c=>c.rarity==='Mythic');
+    if (!mythicEligible) return notify('There are no eligible Mythic characters in this banner. Please choose another banner or enable a Mythic in Admin.');
     if (bannerMode==='selection' && !selectedMythic) return notify('Choose your Mythic first.');
     const bannerLabel = bannerMode==='verse' ? `${activeVerse.toUpperCase()} VERSE BANNER` : bannerMode==='featured' ? `FEATURED MYTHIC · ${featuredMythic?.name||''}` : bannerMode==='selection' ? `CUSTOM MYTHIC · ${getChar(selectedMythic)?.name||''}` : 'ALL-UNIT BANNER';
     setOpening(true);
@@ -939,15 +951,16 @@ function Summon({save,setSave,notify,session}) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><div className="eyebrow">SUMMON LAB</div><h1>Shonen Summoning</h1><p>Summon 1 for 100 gems, 5 for 450, or 10 for 900. Reveal your cards before summoning again.</p></div>
+        <div><div className="eyebrow">SUMMON LAB</div><h1>SUMMONING</h1><p>Summon 1 for {SUMMON_CONFIG.prices.single} gems, 5 for {SUMMON_CONFIG.prices.five}, or 10 for {SUMMON_CONFIG.prices.ten}. Choose a banner to target your favourite Mythics.</p></div>
         <div className="big-gem">💎 {save.gems.toLocaleString()}</div>
       </div>
       <div className="banner-selector" role="tablist" aria-label="Summon banners">
+        <button role="tab" aria-selected={bannerMode==='all'} className={bannerMode==='all'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('all');setShowBannerRoster(false);}}><span className="eyebrow">FULL ROSTER</span><strong>ALL CHARACTERS</strong><small>Mythics from every eligible verse</small></button>
         <button role="tab" aria-selected={bannerMode==='verse'} className={bannerMode==='verse'?'banner-option verse-option active':'banner-option verse-option'} disabled={pending||opening} onClick={()=>{setBannerMode('verse');setShowBannerRoster(false);}}>
           <span className="eyebrow">ROTATING · VERSE</span><strong>{activeVerse.toUpperCase()}</strong><small>Verse Mythics · changes in {remainingLabel}</small>
         </button>
         <button role="tab" aria-selected={bannerMode==='featured'} className={bannerMode==='featured'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('featured');setShowBannerRoster(false);}}>
-          <span className="eyebrow">ROTATING · 90 MIN</span><strong>{featuredMythic?.name || 'FEATURED MYTHIC'}</strong><small>One featured Mythic · changes in {featuredRemainingLabel}</small>
+          <span className="eyebrow">ROTATING · {SUMMON_CONFIG.featuredMinutes} MIN</span><strong>{featuredMythic?.name || 'FEATURED MYTHIC'}</strong><small>One featured Mythic · changes in {featuredRemainingLabel}</small>
         </button>
         <button role="tab" aria-selected={bannerMode==='selection'} className={bannerMode==='selection'?'banner-option active':'banner-option'} disabled={pending||opening} onClick={()=>{setBannerMode('selection');setShowBannerRoster(false);}}>
           <span className="eyebrow">CUSTOM · 12 HOURS</span><strong>MYTHIC SELECTION</strong><small>400 Mythic pity · {selectedMythic?getChar(selectedMythic)?.name:'Choose a Mythic'}</small>
@@ -955,12 +968,12 @@ function Summon({save,setSave,notify,session}) {
       </div>
       <div className="summon-layout">
         <section className="panel summon-stage">
-          <div className="summon-copy"><div className="eyebrow">{bannerMode==='verse'?`${activeVerse.toUpperCase()} VERSE BANNER`:bannerMode==='featured'?'FEATURED MYTHIC BANNER':bannerMode==='selection'?'CUSTOM MYTHIC SELECTION':'ALL-UNIT BANNER'}</div><h2>OPEN THE GATE.</h2><p>{bannerMode==='verse'?'Only the Mythic pool is restricted to this featured verse; lower rarities use the full roster.':bannerMode==='featured'?'Only the featured Mythic can drop at Mythic rarity; lower rarities use the full roster.':bannerMode==='selection'?'Choose one Mythic to target. Lower rarities remain available; only your selected Mythic can drop.':'Summon from the full roster.'} Duplicates are kept.</p>{bannerMode==='selection' && <div className="selection-controls"><label>Choose your Mythic<select value={selectedMythic} disabled={!selectionCanChange || opening || pending} onChange={async e=>{const id=e.target.value;if(!id)return;try{let changedAt=Date.now();if(session){const result=await rpc(session,'set_custom_mythic_selection',{p_character_id:id});changedAt=Number(result.changedAt||changedAt);}setSelectedMythic(id);localStorage.setItem('shonen-siege-selected-mythic',id);setSelectionChangedAt(changedAt);localStorage.setItem('shonen-siege-selection-changed-at',String(changedAt));}catch(err){notify(err.message||'Could not change Mythic selection.');}}}><option value="">Select a Mythic…</option>{mythics.map(c=><option key={c.id} value={c.id}>{c.name} · {c.anime}</option>)}</select></label><small>{selectionCanChange?'You can change your selection now.':`Selection locked for ${selectionRemainingLabel}.`}</small></div>}</div>
-          <div className="pack-visual"><div className="pack-glow"></div><div className="pack-mark">🎴</div><div className="pack-name">SHONEN<br/><b>SIEGE</b></div></div>
+          <div className="summon-copy"><div className="eyebrow">{bannerMode==='verse'?`${activeVerse.toUpperCase()} VERSE BANNER`:bannerMode==='featured'?'FEATURED MYTHIC BANNER':bannerMode==='selection'?'CUSTOM MYTHIC SELECTION':'ALL-UNIT BANNER'}</div><h2>OPEN THE GATE.</h2><p>{bannerMode==='verse'?'Only the Mythic pool is restricted to this featured verse; lower rarities use the full roster.':bannerMode==='featured'?'Only the featured Mythic can drop at Mythic rarity; lower rarities use the full roster.':bannerMode==='selection'?'Choose one Mythic to target. Lower rarities remain available; only your selected Mythic can drop.':'Summon from the full roster.'} Duplicates are kept.</p>{bannerMode==='selection' && <div className="selection-controls"><label>Choose your Mythic<select value={selectedMythic} disabled={!selectionCanChange || opening || pending} onChange={async e=>{const id=e.target.value;if(!id)return;try{let changedAt=Date.now();if(session){const result=await rpc(session,'set_custom_mythic_selection',{p_character_id:id});changedAt=Number(result.changedAt||changedAt);}setSelectedMythic(id);localStorage.setItem('shonen-siege-selected-mythic',id);setSelectionChangedAt(changedAt);localStorage.setItem('shonen-siege-selection-changed-at',String(changedAt));}catch(err){notify(err.message||'Could not change Mythic selection.');}}}><option value="">Select a Mythic…</option>{selectionMythics.map(c=><option key={c.id} value={c.id}>{c.name} · {c.anime}</option>)}</select></label><small>{selectionCanChange?'You can change your selection now.':`Selection locked for ${selectionRemainingLabel}.`}</small></div>}</div>
+          {SUMMON_CONFIG.bannerImage ? <div className="pack-visual summon-custom-art"><img src={SUMMON_CONFIG.bannerImage} alt="Summon banner artwork"/></div> : <div className="pack-visual"><div className="pack-glow"></div><div className="pack-mark">🎴</div><div className="pack-name">SHONEN<br/><b>SIEGE</b></div></div>}
           <div className="summon-buttons">
-            <button className="secondary" disabled={opening||pending} onClick={()=>open(1)}>{opening?'SUMMONING...':'SUMMON 1 — 💎 100'}</button>
-            <button className="secondary" disabled={opening||pending} onClick={()=>open(5)}>{opening?'SUMMONING...':'SUMMON 5 — 💎 450'}</button>
-            <button className="primary pack-button" disabled={opening||pending} onClick={()=>open(10)}>{opening?'SUMMONING...':'SUMMON 10 — 💎 900'}</button>
+            <button className="secondary" disabled={opening||pending} onClick={()=>open(1)}>{opening?'SUMMONING...':`SUMMON 1 — 💎 ${SUMMON_CONFIG.prices.single}`}</button>
+            <button className="secondary" disabled={opening||pending} onClick={()=>open(5)}>{opening?'SUMMONING...':`SUMMON 5 — 💎 ${SUMMON_CONFIG.prices.five}`}</button>
+            <button className="primary pack-button" disabled={opening||pending} onClick={()=>open(10)}>{opening?'SUMMONING...':`SUMMON 10 — 💎 ${SUMMON_CONFIG.prices.ten}`}</button>
           </div>
           <div className="banner-roster-actions"><button className="text-btn" onClick={()=>setShowBannerRoster(v=>!v)}>{showBannerRoster?'HIDE BANNER ROSTER':'VIEW CHARACTERS IN THIS BANNER'} ({bannerPool.length})</button></div>
           {showBannerRoster && <div className="banner-roster"><div className="eyebrow">AVAILABLE CHARACTERS · {bannerMode==='all'?'ALL VERSES':activeVerse}</div><div className="banner-pool-grid">{bannerPool.map(c=><div key={c.id} className="banner-pool-card"><span style={{color:RARITY_COLOR[c.rarity]}}>{c.rarity}</span><b>{c.name}</b><small>{c.anime}</small></div>)}</div></div>}
